@@ -1,0 +1,104 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  POSTER
+  EYE
+}
+
+// Auth-facing role concept used by middleware/clients.
+// Internally we still store into the existing `Role` enum to avoid
+// an enum-type migration on the MVP data.
+enum UserRole {
+  POSTER
+  EYE
+}
+
+enum JobStatus {
+  OPEN
+  MATCHED
+  LIVE
+  COMPLETED
+  FLAGGED
+}
+
+model User {
+  id          String @id @default(cuid())
+  // Domain identifier used across Jobs/Bids (`posterId` / `eyeUserId`)
+  userId      String @unique
+  role        Role
+  displayName String
+  rating      Float
+
+  // Reputation tracking for Eyes (updated on each job completion).
+  totalRating   Int @default(0)
+  jobsCompleted Int @default(0)
+
+  // Auth.js credentials
+  email        String? @unique
+  passwordHash String?
+
+  posterJobs Job[] @relation("PosterJobs")
+  bidsAsEye  Bid[] @relation("EyeBids")
+
+  // Reuse the existing `Profile` table created for the MVP.
+  @@map("Profile")
+}
+
+model Job {
+  id     String @id @default(cuid())
+  posterId String
+  poster   User @relation("PosterJobs", fields: [posterId], references: [userId])
+
+  title     String
+  address   String
+  budget    Float
+  status    JobStatus @default(OPEN)
+  latitude  Float
+  longitude Float
+
+  completedAt DateTime?
+
+  // Rating/review given by the Poster for the accepted Eye.
+  // 1-5 scale, required when the job is COMPLETED.
+  rating Int?
+  review String?
+
+  acceptedBidId String? @unique
+  acceptedBid   Bid?    @relation("AcceptedBid", fields: [acceptedBidId], references: [id])
+  channelName   String?
+
+  bids    Bid[]
+  session Session?
+}
+
+model Bid {
+  id String @id @default(cuid())
+
+  jobId String
+  job   Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  eyeUserId String
+  eye       User @relation("EyeBids", fields: [eyeUserId], references: [userId])
+
+  amount Float
+  note   String?
+
+  acceptedOnJob Job? @relation("AcceptedBid")
+
+  @@unique([jobId, eyeUserId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  jobId        String   @unique
+  job          Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  agoraChannel String
+  createdAt    DateTime @default(now())
+}
